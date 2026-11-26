@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     log_level: str = "INFO"
+    dev_api_tokens: dict[str, SecretStr] = Field(default_factory=dict)
 
     postgres_host: str = "127.0.0.1"
     postgres_port: int = Field(default=5433, ge=1, le=65535)

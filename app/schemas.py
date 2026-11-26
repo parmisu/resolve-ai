@@ -103,6 +103,7 @@ class TicketRead(ResponseSchema):
     updated_at: AwareDatetime
     resolved_at: AwareDatetime | None
     closed_at: AwareDatetime | None
+    version: int
 
 
 class StaffTicketRead(TicketRead):
@@ -113,3 +114,26 @@ class StaffTicketRead(TicketRead):
     mandatory_escalation: bool
     escalation_reason: str | None
     version: int
+
+
+class TicketUpdate(RequestSchema):
+    version: int = Field(ge=1, strict=True)
+    message: str | None = Field(default=None, min_length=1)
+    priority: TicketPriority | None = None
+
+    @model_validator(mode="after")
+    def validate_changes(self) -> Self:
+        editable_fields = self.model_fields_set - {"version"}
+
+        if not editable_fields:
+            raise ValueError("Provide at least one field to update.")
+
+        for field_name in editable_fields:
+            if getattr(self, field_name) is None:
+                raise ValueError(f"{field_name} cannot be null.")
+
+        return self
+
+
+class TicketClose(RequestSchema):
+    version: int = Field(ge=1, strict=True)

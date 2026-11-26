@@ -109,3 +109,98 @@ docker compose stop db
 ```
 
 Database data is retained in the Docker volume.
+
+## Ticket API
+
+Start the database, then run the API from the repository root with the
+virtual environment activated:
+
+```bash
+docker compose up -d --wait db
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Interactive documentation: http://127.0.0.1:8000/docs
+
+### Development authentication
+
+Ticket endpoints require a Bearer token. With `APP_ENV=development`,
+configure `DEV_API_TOKENS` in `.env` as a JSON mapping from a seeded user's
+`auth_subject` to a unique, randomly generated token.
+
+Generate a token locally:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Configuration structure; replace each placeholder with a different token:
+
+```dotenv
+DEV_API_TOKENS='{"synthetic:customer-alex":"REPLACE_WITH_RANDOM_TOKEN","synthetic:customer-sam":"REPLACE_WITH_ANOTHER_RANDOM_TOKEN","synthetic:support-agent":"REPLACE_WITH_ANOTHER_RANDOM_TOKEN","synthetic:administrator":"REPLACE_WITH_ANOTHER_RANDOM_TOKEN"}'
+```
+
+Restart the API after changing `.env`. In Swagger's **Authorize** dialog,
+paste only the token into **Value**. Authentication may need to be repeated
+after refreshing the page.
+
+These tokens are for local development only. Never commit real tokens.
+Authentication for public deployment is not yet implemented; protected
+endpoints reject requests outside the development environment.
+
+### Endpoints
+
+| Method | Path | Behavior |
+|---|---|---|
+| POST | `/tickets` | Create a ticket for the authenticated customer |
+| GET | `/tickets` | List accessible tickets with filters and pagination |
+| GET | `/tickets/{ticket_id}` | Retrieve an accessible ticket |
+| PATCH | `/tickets/{ticket_id}` | Update permitted fields using the current version |
+| POST | `/tickets/{ticket_id}/close` | Allow staff to close a resolved ticket |
+
+List filters: `status`, `category`, and `priority`.
+Pagination: `limit` (1–100, default 20) and `offset` (default 0).
+
+Customers can access only their own tickets and edit their message while
+the ticket is open. Staff can change priority on tickets that are not
+resolved or closed, but cannot rewrite customer messages.
+
+Update and close requests require the current `version` from a GET
+response. A stale version returns `409 Conflict`.
+
+Only support agents and administrators can close tickets, and only from
+the `resolved` state. Resolution through human review is a later milestone.
+
+Responses currently use the public ticket schema. Staff-specific response
+fields are not yet exposed.
+
+### API tests
+
+Create the dedicated test database once:
+
+```bash
+docker compose exec db createdb -U resolve_ai resolve_ai_test
+```
+
+If it already exists, continue with migrations:
+
+```bash
+POSTGRES_DB=resolve_ai_test python -m alembic upgrade head
+python -m pytest -q
+```
+
+Integration tests require PostgreSQL to be running. They use synthetic
+fixtures and test-only tokens, and roll back database changes after each
+test. Uvicorn does not need to be running.
+
+### Troubleshooting
+
+- `401`: authorize with a valid token for an active user.
+- `403`: the authenticated user cannot perform the requested action.
+- `404`: the ticket does not exist or is not accessible to the customer.
+- `409`: fetch the latest version and check the ticket's current state.
+- `422`: check the request body, UUID, and query parameters.
+- PostgreSQL connection refused: start Docker Desktop and the `db` service.
+
+Database outages currently produce a generic `500` response. A dedicated
+readiness check and graceful database-unavailable handling remain to be added.
