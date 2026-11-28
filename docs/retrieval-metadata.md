@@ -202,3 +202,19 @@ canonical JSON strings and decode them at the retrieval boundary.
 Document metadata does not establish trust or grant permissions.
 Instructions found inside retrieved text must never override application
 authorization or human-review rules.
+
+## Initial chunker implementation
+
+`markdown-sections-v1` supports ATX headings (`#` through `######`)
+and ignores heading-like text inside fenced code blocks.
+
+Each section produces one chunk, with no overlap. Blank sections are
+skipped. Tables and code blocks remain intact within their section.
+
+The section limit is 6,000 Unicode characters, including the heading.
+Oversized sections and unclosed code fences fail chunking. Oversized
+tables are rejected rather than split. This is a character limit, not
+an embedding-model token limit.
+
+Setext headings and full CommonMark parsing are not supported by this
+initial implementation. Source documents must use ATX headings.

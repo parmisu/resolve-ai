@@ -204,3 +204,82 @@ test. Uvicorn does not need to be running.
 
 Database outages currently produce a generic `500` response. A dedicated
 readiness check and graceful database-unavailable handling remain to be added.
+
+## Knowledge-base ingestion
+
+The ingestion pipeline loads committed Markdown documents from
+`data/knowledge_base/`, validates front matter, selects applicable active
+versions, and stores section-based chunks in PostgreSQL.
+
+Prerequisites: Git, installed project dependencies, a running database,
+and migrations applied.
+
+```bash
+docker compose up -d --wait db
+python -m alembic upgrade head
+python -m app.retrieval.ingest --ref HEAD --as-of 2026-11-28
+```
+
+`--ref` accepts a Git branch, tag, or full commit hash.
+`--as-of` selects the policy applicability date; if omitted, UTC today is used.
+
+The source snapshot is resolved to a full commit hash before loading.
+Uncommitted document edits are not ingested. Commit document changes first
+and increment the document version whenever its content changes.
+
+### Chunking and provenance
+
+- Each ATX-heading section becomes one chunk, with no overlap.
+- Tables and fenced code blocks remain intact within a section.
+- Sections exceeding 6,000 Unicode characters fail ingestion.
+- Chunk IDs are deterministic and exclude run IDs and timestamps.
+- Metadata retains document identity, version, section, source commit,
+  content hashes, and exact character offsets.
+
+See [the metadata contract](docs/retrieval-metadata.md).
+
+### Repeated runs and failures
+
+Re-ingesting identical sources with the same chunking configuration reuses
+existing chunk records. Each execution creates a separate ingestion-run
+record and updates the reused chunks' latest ingestion metadata.
+
+A successful run publishes a complete active snapshot. Previously active
+chunks absent from that snapshot become inactive; their records remain
+available for provenance.
+
+Conflicting content under an existing document ID and version is rejected.
+An empty eligible selection is rejected to prevent accidental empty-index
+publication.
+
+Document and chunk changes are transactional. Processing or storage
+failures roll back those changes and preserve the previous active index.
+A failed-run report is retained when the database transaction remains usable.
+
+Invalid Git references and unavailable database connections may prevent
+creation of a run record. The CLI exits with a nonzero status on failure.
+
+### Validation
+
+Run the complete test suite with PostgreSQL available:
+
+```bash
+POSTGRES_DB=resolve_ai_test python -m alembic upgrade head
+python -m pytest -q
+```
+
+Tests cover document validation, immutable Git snapshots, deterministic
+chunking, version selection, repeated indexing, revision replacement,
+and rollback after chunking or storage failures.
+
+### Current limitations
+
+This pipeline stores text and metadata; it does not generate embeddings
+or perform semantic retrieval.
+
+The initial parser supports ATX headings and fenced code blocks rather
+than full CommonMark. Published versions use numeric MAJOR.MINOR.PATCH;
+prerelease versions are not supported.
+
+Ingestion replaces the entire TaskFlow knowledge-base snapshot and must
+not be used as a partial-document update operation.
